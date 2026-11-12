@@ -24,58 +24,62 @@ workflows:
             curl -L --retry 3 --retry-delay 3 -o /tmp/unity_pkg/unity.pkg "$ARM_URL" || curl -L --retry 3 -o /tmp/unity_pkg/unity.pkg "$X64_URL"
           fi
           ls -lh /tmp/unity_pkg/unity.pkg
-          file /tmp/unity_pkg/unity.pkg
-          sudo installer -pkg /tmp/unity_pkg/unity.pkg -target / -verboseR 2>&1 | tail -20 || echo "INSTALL_ARM_FAILED"
-          echo "=== after install ==="
-          ls -la /Applications/ | head -30
-          echo "=== find Unity binary ==="
-          find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -5
+          sudo installer -pkg /tmp/unity_pkg/unity.pkg -target / -verboseR 2>&1 | tail -10 || echo "INSTALL_RETRY_NEEDED"
           U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -1)
           echo "DETECTED_UNITY=$U"
           if [ -n "$U" ]; then echo "UNITY_PATH=$U" >> $CM_ENV; fi
       - name: Install iOS Build Support
         script: |
           set -x
-          if [ -z "$UNITY_PATH" ]; then
-            echo "NO_UNITY_YET"
-            find /Applications -maxdepth 5 -name "Unity.app" 2>/dev/null | head -3
-            exit 0
+          if [ -z "$UNITY_PATH" ]; then U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); echo "UNITY_PATH=$U" >> $CM_ENV; else U="$UNITY_PATH"; fi
+          ENGINES="$(dirname "$(dirname "$(dirname "$(dirname "$U")")")")/PlaybackEngines"
+          echo "ENGINES=$ENGINES"
+          if [ ! -d "$ENGINES/iOSSupport" ]; then
+            curl -L --retry 3 -o /tmp/unity_pkg/ios.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
+            sudo installer -pkg /tmp/unity_pkg/ios.pkg -target / -verboseR 2>&1 | tail -5 || echo "IOS_MODULE_FAILED"
           fi
-          ENGINES_DIR="$(dirname "$(dirname "$(dirname "$(dirname "$UNITY_PATH")")")")/PlaybackEngines"
-          echo "ENGINES_DIR=$ENGINES_DIR"
-          ls "$ENGINES_DIR" 2>/dev/null | head -20 || true
-          if [ ! -d "$ENGINES_DIR/iOSSupport" ]; then
-            IOS_URL="https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
-            curl -L --retry 3 -o /tmp/unity_pkg/ios.pkg "$IOS_URL"
-            ls -lh /tmp/unity_pkg/ios.pkg
-            sudo installer -pkg /tmp/unity_pkg/ios.pkg -target / -verboseR 2>&1 | tail -10 || echo "IOS_MODULE_FAILED"
-          fi
-          ls "$ENGINES_DIR" 2>/dev/null || true
+          ls "$ENGINES" 2>/dev/null || true
+      - name: Generate Unity activation file (.alf)
+        script: |
+          set -x
+          if [ -z "$UNITY_PATH" ]; then U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); else U="$UNITY_PATH"; fi
+          echo "using $U"
+          mkdir -p "$CM_BUILD_DIR/alf"
+          cd "$CM_BUILD_DIR/alf"
+          "$U" -quit -batchmode -nographics -createManualActivationFile -logFile /tmp/alf.log || true
+          find . -maxdepth 2 -type f | head -20
+          find / -name "*.alf" -newermt "-10 minutes" 2>/dev/null | head -5
+          cp -v *.alf "$CM_BUILD_DIR/" 2>/dev/null || true
+          ls -la "$CM_BUILD_DIR" | head -20
+          tail -20 /tmp/alf.log 2>/dev/null || true
       - name: Locate Unity and report
         script: |
           set -x
-          echo "UNITY_PATH=$UNITY_PATH"
           U="$UNITY_PATH"
           if [ -z "$U" ] || [ ! -x "$U" ]; then
             U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -1)
             echo "UNITY_PATH=$U" >> $CM_ENV
           fi
           echo "FINAL_UNITY=$U"
-          "$U" -version || echo "UNITY_VERSION_CHECK_FAILED"
-          ls -la "$(dirname "$(dirname "$(dirname "$(dirname "$U")")")")" 2>/dev/null | head -10
-      - name: Activate Unity license
+          "$U" -version || echo "VERSION_FAIL"
+      - name: Activate license (manual ulf if present)
         script: |
           set -x
-          if [ -z "$UNITY_PATH" ]; then UNITY_PATH=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); fi
-          echo "using $UNITY_PATH"
-          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || true
-          tail -40 /tmp/unity_license.log 2>/dev/null || echo "NO_LICENSE_LOG"
+          if [ -z "$UNITY_PATH" ]; then U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); else U="$UNITY_PATH"; fi
+          if [ -f "Unity_v${UNITY_VERSION}.ulf" ]; then
+            echo "found ulf, activating manually"
+            "$U" -quit -batchmode -nographics -manualLicenseFile "Unity_v${UNITY_VERSION}.ulf" -logFile /tmp/lic.log || true
+            tail -20 /tmp/lic.log
+          else
+            echo "NO_ULF_FILE_PRESENT -> falling back to credentials"
+            "$U" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/lic.log || true
+            tail -25 /tmp/lic.log
+          fi
       - name: Build iOS Xcode project
         script: |
           set -x
-          if [ -z "$UNITY_PATH" ]; then UNITY_PATH=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); fi
-          echo "using $UNITY_PATH"
-          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -100 /tmp/unity_build.log; exit 1)
+          if [ -z "$UNITY_PATH" ]; then U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); else U="$UNITY_PATH"; fi
+          "$U" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -120 /tmp/unity_build.log; exit 1)
           tail -30 /tmp/unity_build.log
       - name: Archive unsigned ipa
         script: |
@@ -92,5 +96,6 @@ workflows:
           cd "$CM_BUILD_DIR" && zip -qr hshy-unsigned.ipa Payload
           ls -lh hshy-unsigned.ipa
     artifacts:
+      - "*.alf"
       - hshy-unsigned.ipa
       - build/ios/Unity-iPhone.xcodeproj
