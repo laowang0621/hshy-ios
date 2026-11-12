@@ -1,0 +1,16 @@
+name: WinSanity
+
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: windows-latest
+    steps:
+      - name: Report environment
+        shell: pwsh
+        run: |
+          echo "=== windows sanity ==="
+          [System.Environment]::OSVersion.Version
+          echo "cores: $env:NUMBER_OF_PROCESSORS"
+          Get-PSDrive C | Select-Object Used,Free
