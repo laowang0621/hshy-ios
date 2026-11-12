@@ -7,7 +7,6 @@ workflows:
       vars:
         UNITY_VERSION: "2021.3.14f1"
         UNITY_CHANGESET: "eee1884e7226"
-        UNITY_PATH: "/Applications/Unity/Hub/Editor/2021.3.14f1/Unity.app/Contents/MacOS/Unity"
         UNITY_EMAIL: "3484372582@qq.com"
         UNITY_PASSWORD: "Aa50022620100621!"
     cache:
@@ -16,30 +15,68 @@ workflows:
     scripts:
       - name: Install Unity Editor
         script: |
-          set -e
-          if [ ! -d "/Applications/Unity/Hub/Editor/$UNITY_VERSION" ]; then
-            mkdir -p /tmp/unity_pkg
-            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstallerArm64/Unity-$UNITY_VERSION.pkg" || \
-            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstaller/Unity-$UNITY_VERSION.pkg"
-            sudo installer -pkg /tmp/unity_pkg/unity.pkg -target /
+          set -x
+          mkdir -p /tmp/unity_pkg
+          ARM_URL="https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstallerArm64/Unity-$UNITY_VERSION.pkg"
+          X64_URL="https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstaller/Unity-$UNITY_VERSION.pkg"
+          echo "arch: $(uname -m)"
+          if [ ! -f /tmp/unity_pkg/unity.pkg ]; then
+            curl -L --retry 3 --retry-delay 3 -o /tmp/unity_pkg/unity.pkg "$ARM_URL" || curl -L --retry 3 -o /tmp/unity_pkg/unity.pkg "$X64_URL"
           fi
-          ls /Applications/Unity/Hub/Editor/
+          ls -lh /tmp/unity_pkg/unity.pkg
+          file /tmp/unity_pkg/unity.pkg
+          sudo installer -pkg /tmp/unity_pkg/unity.pkg -target / -verboseR 2>&1 | tail -20 || echo "INSTALL_ARM_FAILED"
+          echo "=== after install ==="
+          ls -la /Applications/ | head -30
+          echo "=== find Unity binary ==="
+          find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -5
+          U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -1)
+          echo "DETECTED_UNITY=$U"
+          if [ -n "$U" ]; then echo "UNITY_PATH=$U" >> $CM_ENV; fi
       - name: Install iOS Build Support
         script: |
-          set -e
-          if [ ! -d "/Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/iOSSupport" ]; then
-            curl -L -o /tmp/unity_pkg/ios.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
-            sudo installer -pkg /tmp/unity_pkg/ios.pkg -target /
+          set -x
+          if [ -z "$UNITY_PATH" ]; then
+            echo "NO_UNITY_YET"
+            find /Applications -maxdepth 5 -name "Unity.app" 2>/dev/null | head -3
+            exit 0
           fi
-          ls /Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/ || true
+          ENGINES_DIR="$(dirname "$(dirname "$(dirname "$(dirname "$UNITY_PATH")")")")/PlaybackEngines"
+          echo "ENGINES_DIR=$ENGINES_DIR"
+          ls "$ENGINES_DIR" 2>/dev/null | head -20 || true
+          if [ ! -d "$ENGINES_DIR/iOSSupport" ]; then
+            IOS_URL="https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
+            curl -L --retry 3 -o /tmp/unity_pkg/ios.pkg "$IOS_URL"
+            ls -lh /tmp/unity_pkg/ios.pkg
+            sudo installer -pkg /tmp/unity_pkg/ios.pkg -target / -verboseR 2>&1 | tail -10 || echo "IOS_MODULE_FAILED"
+          fi
+          ls "$ENGINES_DIR" 2>/dev/null || true
+      - name: Locate Unity and report
+        script: |
+          set -x
+          echo "UNITY_PATH=$UNITY_PATH"
+          U="$UNITY_PATH"
+          if [ -z "$U" ] || [ ! -x "$U" ]; then
+            U=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" 2>/dev/null | head -1)
+            echo "UNITY_PATH=$U" >> $CM_ENV
+          fi
+          echo "FINAL_UNITY=$U"
+          "$U" -version || echo "UNITY_VERSION_CHECK_FAILED"
+          ls -la "$(dirname "$(dirname "$(dirname "$(dirname "$U")")")")" 2>/dev/null | head -10
       - name: Activate Unity license
         script: |
-          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || (tail -40 /tmp/unity_license.log; true)
+          set -x
+          if [ -z "$UNITY_PATH" ]; then UNITY_PATH=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); fi
+          echo "using $UNITY_PATH"
+          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || true
+          tail -40 /tmp/unity_license.log 2>/dev/null || echo "NO_LICENSE_LOG"
       - name: Build iOS Xcode project
         script: |
-          set -o pipefail
-          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -80 /tmp/unity_build.log; exit 1)
-          tail -25 /tmp/unity_build.log
+          set -x
+          if [ -z "$UNITY_PATH" ]; then UNITY_PATH=$(find /Applications -maxdepth 7 -type f -name Unity -path "*MacOS*" | head -1); fi
+          echo "using $UNITY_PATH"
+          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -100 /tmp/unity_build.log; exit 1)
+          tail -30 /tmp/unity_build.log
       - name: Archive unsigned ipa
         script: |
           set -e
