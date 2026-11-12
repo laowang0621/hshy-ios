@@ -18,13 +18,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\Unity
-          key: unity-2022.3.62f3-win-v1
+          key: unity-2021.3.14f1-win-v1
 
       - name: Install Unity Editor
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\Unity\Editor\Unity.exe")) {
-            $url = "https://download.unity3d.com/download_unity/96770f904ca7/Windows64EditorInstaller/UnitySetup64-2022.3.62f3.exe"
+            $url = "https://download.unity3d.com/download_unity/eee1884e7226/Windows64EditorInstaller/UnitySetup64-2021.3.14f1.exe"
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\unity.exe" -UseBasicParsing
             Get-Item "$env:TEMP\unity.exe" | Select-Object Length
             Start-Process -FilePath "$env:TEMP\unity.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
@@ -35,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\Unity\Editor\Data\PlaybackEngines\iOSSupport")) {
-            $url = "https://download.unity3d.com/download_unity/96770f904ca7/TargetSupportInstaller/UnitySetup-iOS-Support-for-Editor-2022.3.62f3.exe"
+            $url = "https://download.unity3d.com/download_unity/eee1884e7226/TargetSupportInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.14f1.exe"
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ios.exe" -UseBasicParsing
             Start-Process -FilePath "$env:TEMP\ios.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
           }
@@ -63,7 +63,7 @@ jobs:
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
           $p = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' `
-            -ArgumentList '-quit','-batchmode','-nographics','-username',$env:UNITY_EMAIL,'-password',$env:UNITY_PASSWORD,'-logFile','C:\unity_lic.log' `
+            -ArgumentList '-quit','-batchmode','-nographics','-force-free','-username',$env:UNITY_EMAIL,'-password',$env:UNITY_PASSWORD,'-logFile','C:\unity_lic.log' `
             -Wait -PassThru -NoNewWindow
           Write-Host "exitcode=$($p.ExitCode)"
           if (Test-Path 'C:\unity_lic.log') {
