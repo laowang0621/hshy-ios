@@ -1,0 +1,86 @@
+name: Build iOS (Windows -> Xcode project)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-win.yml"
+
+jobs:
+  build:
+    name: Unity iOS build on Windows
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Unity Editor
+        uses: actions/cache@v4
+        with:
+          path: C:\Unity
+          key: unity-2021.3.14f1-win-v1
+
+      - name: Install Unity Editor
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Unity\Editor\Unity.exe")) {
+            Write-Host "downloading unity editor..."
+            $url = "https://download.unity3d.com/download_unity/eee1884e7226/Windows64EditorInstaller/UnitySetup64-2021.3.14f1.exe"
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\unity.exe" -UseBasicParsing
+            Get-Item "$env:TEMP\unity.exe" | Select-Object Length
+            Write-Host "installing silently..."
+            Start-Process -FilePath "$env:TEMP\unity.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
+          }
+          if (Test-Path "C:\Unity\Editor\Unity.exe") { Write-Host "UNITY_OK" } else { Get-ChildItem C:\ -ErrorAction SilentlyContinue; throw "unity install failed" }
+
+      - name: Install iOS Build Support
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Unity\Editor\Data\PlaybackEngines\iOSSupport")) {
+            $url = "https://download.unity3d.com/download_unity/eee1884e7226/TargetSupportInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.14f1.exe"
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ios.exe" -UseBasicParsing
+            Start-Process -FilePath "$env:TEMP\ios.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
+          }
+          Get-ChildItem "C:\Unity\Editor\Data\PlaybackEngines" | Select-Object Name
+
+      - name: Activate Unity license
+        shell: pwsh
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          $log = "$env:TEMP\lic.log"
+          & "C:\Unity\Editor\Unity.exe" -quit -batchmode -nographics -username $env:UNITY_EMAIL -password $env:UNITY_PASSWORD -logFile $log
+          Write-Host "exit=$LASTEXITCODE"
+          Get-Content $log -Tail 30
+          if (Select-String -Path $log -Pattern "Failed to activate|Missing or bad username" -Quiet) {
+            Write-Host "LICENSE_ACTIVATION_FAILED"
+            exit 1
+          }
+          Write-Host "LICENSE_STEP_DONE"
+
+      - name: Build iOS Xcode project
+        shell: pwsh
+        run: |
+          $log = "$env:TEMP\build.log"
+          & "C:\Unity\Editor\Unity.exe" -quit -batchmode -nographics -projectPath "$PWD" -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile $log
+          Write-Host "exit=$LASTEXITCODE"
+          Get-Content $log -Tail 60
+          if (-not (Test-Path "build\ios")) {
+            Write-Host "NO_BUILD_DIR"
+            Get-ChildItem -Force | Select-Object Name
+            exit 1
+          }
+          Get-ChildItem "build\ios" | Select-Object Name
+
+      - name: Zip Xcode project
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build\ios\*" -DestinationPath "$env:GITHUB_WORKSPACE\xcode-project.zip" -Force
+          Get-Item "xcode-project.zip" | Select-Object Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xcode-project
+          path: xcode-project.zip
+          retention-days: 7
