@@ -11,7 +11,7 @@ on:
 jobs:
   build-ios:
     name: Unity iOS build + unsigned ipa
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
