@@ -10,9 +10,9 @@ workflows:
         UNITY_PATH: "/Applications/Unity/Hub/Editor/2021.3.14f1/Unity.app/Contents/MacOS/Unity"
         UNITY_EMAIL: "3484372582@qq.com"
         UNITY_PASSWORD: "Aa50022620100621!"
-      cache:
-        cache_paths:
-          - /tmp/unity_pkg
+    cache:
+      cache_paths:
+        - /tmp/unity_pkg
     scripts:
       - name: Install Unity Editor
         script: |
