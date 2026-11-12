@@ -7,8 +7,6 @@ on:
         description: 'build note'
         required: false
         default: 'manual'
-  push:
-    branches: [ main ]
 
 jobs:
   build-ios:
