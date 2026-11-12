@@ -1,0 +1,75 @@
+name: Build iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: 'build note'
+        required: false
+        default: 'manual'
+  push:
+    branches: [ main ]
+
+jobs:
+  build-ios:
+    name: Unity iOS build + unsigned ipa
+    runs-on: macos-13
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+
+      - name: Build Xcode project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: iOS
+          unityVersion: 2021.3.14f1
+          allowDirtyBuild: true
+          buildsPath: build
+
+      - name: List build output
+        run: |
+          echo "--- build tree ---"
+          find build -maxdepth 2 -type d 2>/dev/null | head -30 || true
+
+      - name: Archive unsigned ipa
+        run: |
+          set -e
+          cd build/iOS
+          xcodebuild -project Unity-iPhone.xcodeproj \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            archive
+
+      - name: Package ipa
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$RUNNER_TEMP/App.xcarchive/Products/Applications/Unity-iPhone.app" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP" && zip -qr hshy-unsigned.ipa Payload
+          ls -lh "$RUNNER_TEMP/hshy-unsigned.ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hshy-ipa
+          path: ${{ runner.temp }}/hshy-unsigned.ipa
+          retention-days: 7
