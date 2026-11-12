@@ -19,9 +19,9 @@ workflows:
           set -e
           if [ ! -d "/Applications/Unity/Hub/Editor/$UNITY_VERSION" ]; then
             mkdir -p /tmp/unity_pkg
-            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstallerArm64/Unity-$UNITY_VERSION.pkg"
-            sudo installer -pkg /tmp/unity_pkg/unity.pkg -target / || \
-            (curl -L -o /tmp/unity_pkg/unity_intel.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstaller/Unity-$UNITY_VERSION.pkg" && sudo installer -pkg /tmp/unity_pkg/unity_intel.pkg -target /)
+            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstallerArm64/Unity-$UNITY_VERSION.pkg" || \
+            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstaller/Unity-$UNITY_VERSION.pkg"
+            sudo installer -pkg /tmp/unity_pkg/unity.pkg -target /
           fi
           ls /Applications/Unity/Hub/Editor/
       - name: Install iOS Build Support
@@ -31,15 +31,15 @@ workflows:
             curl -L -o /tmp/unity_pkg/ios.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
             sudo installer -pkg /tmp/unity_pkg/ios.pkg -target /
           fi
-          ls /Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/
+          ls /Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/ || true
       - name: Activate Unity license
         script: |
-          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || tail -30 /tmp/unity_license.log
+          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || (tail -40 /tmp/unity_license.log; true)
       - name: Build iOS Xcode project
         script: |
           set -o pipefail
-          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -60 /tmp/unity_build.log; exit 1)
-          tail -20 /tmp/unity_build.log
+          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -80 /tmp/unity_build.log; exit 1)
+          tail -25 /tmp/unity_build.log
       - name: Archive unsigned ipa
         script: |
           set -e
