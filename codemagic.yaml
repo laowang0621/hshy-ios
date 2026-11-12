@@ -1,0 +1,59 @@
+workflows:
+  unity-ios:
+    name: Unity iOS Build
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      vars:
+        UNITY_VERSION: "2021.3.14f1"
+        UNITY_CHANGESET: "eee1884e7226"
+        UNITY_PATH: "/Applications/Unity/Hub/Editor/2021.3.14f1/Unity.app/Contents/MacOS/Unity"
+        UNITY_EMAIL: "3484372582@qq.com"
+        UNITY_PASSWORD: "Aa50022620100621!"
+      cache:
+        cache_paths:
+          - /tmp/unity_pkg
+    scripts:
+      - name: Install Unity Editor
+        script: |
+          set -e
+          if [ ! -d "/Applications/Unity/Hub/Editor/$UNITY_VERSION" ]; then
+            mkdir -p /tmp/unity_pkg
+            curl -L -o /tmp/unity_pkg/unity.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstallerArm64/Unity-$UNITY_VERSION.pkg"
+            sudo installer -pkg /tmp/unity_pkg/unity.pkg -target / || \
+            (curl -L -o /tmp/unity_pkg/unity_intel.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorInstaller/Unity-$UNITY_VERSION.pkg" && sudo installer -pkg /tmp/unity_pkg/unity_intel.pkg -target /)
+          fi
+          ls /Applications/Unity/Hub/Editor/
+      - name: Install iOS Build Support
+        script: |
+          set -e
+          if [ ! -d "/Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/iOSSupport" ]; then
+            curl -L -o /tmp/unity_pkg/ios.pkg "https://download.unity3d.com/download_unity/$UNITY_CHANGESET/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-$UNITY_VERSION.pkg"
+            sudo installer -pkg /tmp/unity_pkg/ios.pkg -target /
+          fi
+          ls /Applications/Unity/Hub/Editor/$UNITY_VERSION/PlaybackEngines/
+      - name: Activate Unity license
+        script: |
+          "$UNITY_PATH" -quit -batchmode -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /tmp/unity_license.log || tail -30 /tmp/unity_license.log
+      - name: Build iOS Xcode project
+        script: |
+          set -o pipefail
+          "$UNITY_PATH" -quit -batchmode -nographics -projectPath . -buildTarget iOS -executeMethod BuildScript.BuildIOS -logFile /tmp/unity_build.log || (tail -60 /tmp/unity_build.log; exit 1)
+          tail -20 /tmp/unity_build.log
+      - name: Archive unsigned ipa
+        script: |
+          set -e
+          cd build/ios
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone -configuration Release -sdk iphoneos \
+            -archivePath "$CM_BUILD_DIR/App.xcarchive" \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM="" archive
+      - name: Package ipa
+        script: |
+          set -e
+          mkdir -p "$CM_BUILD_DIR/Payload"
+          cp -R "$CM_BUILD_DIR/App.xcarchive/Products/Applications/Unity-iPhone.app" "$CM_BUILD_DIR/Payload/"
+          cd "$CM_BUILD_DIR" && zip -qr hshy-unsigned.ipa Payload
+          ls -lh hshy-unsigned.ipa
+    artifacts:
+      - hshy-unsigned.ipa
+      - build/ios/Unity-iPhone.xcodeproj
