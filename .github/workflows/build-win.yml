@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - ".github/workflows/build-win.yml"
+      - "Unity_lic.ulf"
 
 jobs:
   build:
@@ -18,13 +18,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\Unity
-          key: unity-2021.3.14f1-win-v1
+          key: unity-2022.3.62f3-win-v2
 
       - name: Install Unity Editor
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\Unity\Editor\Unity.exe")) {
-            $url = "https://download.unity3d.com/download_unity/eee1884e7226/Windows64EditorInstaller/UnitySetup64-2021.3.14f1.exe"
+            $url = "https://download.unity3d.com/download_unity/96770f904ca7/Windows64EditorInstaller/UnitySetup64-2022.3.62f3.exe"
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\unity.exe" -UseBasicParsing
             Get-Item "$env:TEMP\unity.exe" | Select-Object Length
             Start-Process -FilePath "$env:TEMP\unity.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
@@ -35,26 +35,11 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\Unity\Editor\Data\PlaybackEngines\iOSSupport")) {
-            $url = "https://download.unity3d.com/download_unity/eee1884e7226/TargetSupportInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.14f1.exe"
+            $url = "https://download.unity3d.com/download_unity/96770f904ca7/TargetSupportInstaller/UnitySetup-iOS-Support-for-Editor-2022.3.62f3.exe"
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ios.exe" -UseBasicParsing
             Start-Process -FilePath "$env:TEMP\ios.exe" -ArgumentList "/S","/D=C:\Unity" -Wait
           }
           Get-ChildItem "C:\Unity\Editor\Data\PlaybackEngines" | Select-Object Name
-
-      - name: Unity smoke test
-        shell: pwsh
-        run: |
-          Write-Host "exists: $(Test-Path 'C:\Unity\Editor\Unity.exe')"
-          (Get-Item 'C:\Unity\Editor\Unity.exe').VersionInfo | Select-Object FileVersion,ProductVersion
-          Write-Host "--- try -version ---"
-          $p = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' -ArgumentList '-version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\v.out" -RedirectStandardError "$env:TEMP\v.err"
-          Write-Host "exitcode=$($p.ExitCode)"
-          Write-Host "--- stdout ---"; Get-Content "$env:TEMP\v.out" -ErrorAction SilentlyContinue
-          Write-Host "--- stderr ---"; Get-Content "$env:TEMP\v.err" -ErrorAction SilentlyContinue
-          Write-Host "--- try batchmode log ---"
-          $p2 = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' -ArgumentList '-quit','-batchmode','-nographics','-logFile','C:\unity_smoke.log' -Wait -PassThru -NoNewWindow
-          Write-Host "exitcode2=$($p2.ExitCode)"
-          if (Test-Path 'C:\unity_smoke.log') { Get-Content 'C:\unity_smoke.log' -Tail 40 } else { Write-Host "NO_SMOKE_LOG" }
 
       - name: Activate Unity license
         shell: pwsh
@@ -62,19 +47,33 @@ jobs:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
-          $p = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' `
-            -ArgumentList '-quit','-batchmode','-nographics','-force-free','-username',$env:UNITY_EMAIL,'-password',$env:UNITY_PASSWORD,'-logFile','C:\unity_lic.log' `
-            -Wait -PassThru -NoNewWindow
-          Write-Host "exitcode=$($p.ExitCode)"
-          if (Test-Path 'C:\unity_lic.log') {
-            Get-Content 'C:\unity_lic.log' -Tail 40
-            if (Select-String -Path 'C:\unity_lic.log' -Pattern 'Failed to activate|Missing or bad username|No valid Unity Editor license' -Quiet) {
-              Write-Host "LICENSE_ACTIVATION_FAILED"; exit 1
-            }
+          Write-Host "=== repo ulf files ==="
+          Get-ChildItem -Recurse -Filter *.ulf -ErrorAction SilentlyContinue | Select-Object FullName
+          $ulf = Get-ChildItem -Path . -Filter "*.ulf" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($ulf) {
+            Write-Host "FOUND_ULF: $($ulf.FullName)"
+            $p = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' `
+              -ArgumentList '-quit','-batchmode','-nographics','-manualLicenseFile',$ulf.FullName,'-logFile','C:\unity_lic.log' `
+              -Wait -PassThru -NoNewWindow
+            Write-Host "exitcode=$($p.ExitCode)"
           } else {
-            Write-Host "NO_LIC_LOG"; exit 1
+            Write-Host "NO_ULF_IN_REPO -> try credentials"
+            $p = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' `
+              -ArgumentList '-quit','-batchmode','-nographics','-username',$env:UNITY_EMAIL,'-password',$env:UNITY_PASSWORD,'-logFile','C:\unity_lic.log' `
+              -Wait -PassThru -NoNewWindow
+            Write-Host "exitcode=$($p.ExitCode)"
           }
-          Write-Host "LICENSE_STEP_DONE"
+          if (Test-Path 'C:\unity_lic.log') { Get-Content 'C:\unity_lic.log' -Tail 40 }
+          Write-Host "=== verify license by version call ==="
+          $v = Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' -ArgumentList '-quit','-batchmode','-nographics','-logFile','C:\unity_verify.log' -Wait -PassThru -NoNewWindow
+          Write-Host "verify exit=$($v.ExitCode)"
+          if (Test-Path 'C:\unity_verify.log') {
+            Get-Content 'C:\unity_verify.log' -Tail 15
+            if (Select-String -Path 'C:\unity_verify.log' -Pattern 'No valid Unity Editor license' -Quiet) {
+              Write-Host "STILL_NO_LICENSE"; exit 1
+            }
+          }
+          Write-Host "LICENSE_OK"
 
       - name: Build iOS Xcode project
         shell: pwsh
